@@ -27,7 +27,7 @@ header_t *get_free_block(size_t size) // try to find a free block of memory
     {
         if (curr->s.is_free && curr->s.size >= size) // if the block is free and has enough space
             return curr;                             // return the pointer to the block
-        curr = curr->s.next;                         // move to the next block
+        curr = curr->s.next;                         // move to the next block if we didn't find a useable block
     }
     return NULL;
 }
@@ -56,15 +56,16 @@ void *malloc(size_t size)
         pthread_mutex_unlock(&global_malloc_lock); // unlock the mutex
         return NULL;
     }
+    // if the request for memory was successful, create a new header for the block
     header = (header_t *)block;
     header->s.size = size;
     header->s.is_free = 0;
     header->s.next = NULL;
-    if (!head)
-        head = header;
-    if (tail)
-        tail->s.next = header;
-    tail = header;
+    if (!head)                 // if the list is empty
+        head = header;         // set the head to the new block
+    if (tail)                  // if the list is not empty
+        tail->s.next = header; // set the next block of the tail to the new block
+    tail = header;             // if the list is empty, set the tail to the new block
     pthread_mutex_unlock(&global_malloc_lock);
-    return (void *)(header + 1);
+    return (void *)(header + 1); // return the address of the block after the header
 }
