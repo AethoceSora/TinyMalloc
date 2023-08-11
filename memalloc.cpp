@@ -3,6 +3,7 @@
 #include <pthread.h>
 /* Only for the debug printf */
 #include <stdio.h>
+#include <iostream>
 union header
 {
     struct
@@ -27,7 +28,7 @@ header_t *get_free_block(size_t size) // try to find a free block of memory
     {
         if (curr->s.is_free && curr->s.size >= size) // if the block is free and has enough space
             return curr;                             // return the pointer to the block
-        curr = curr->s.next;                         // move to the next block if we didn't find a useable block
+        curr = curr->s.next;                         // move to the next block if we didn't find a usable block
     }
     return NULL;
 }
@@ -68,4 +69,136 @@ void *malloc(size_t size)
     tail = header;             // if the list is empty, set the tail to the new block
     pthread_mutex_unlock(&global_malloc_lock);
     return (void *)(header + 1); // return the address of the block after the header
+}
+
+void free(void *block)
+{
+    header_t *header, *tmp;
+    void *programbreak;
+    if (!block) // if the block is NULL, return
+        return;
+    pthread_mutex_lock(&global_malloc_lock); // lock the mutex
+    header = (header_t *)block - 1;          // get the header of the block
+    programbreak = sbrk(0);                  // get the current program break
+    // if the block to be freed is the last one in the list
+    if ((char *)block + header->s.size == programbreak)
+    {
+        if (head == tail) // if the list only has one block
+        {
+            head = tail = NULL; // set the head and tail to NULL
+        }
+        else // if the list has more than one block
+        {
+            tmp = head; // start from the head of the list
+            while (tmp) // traverse the list
+            {
+                if (tmp->s.next == tail) // if the next block is the tail
+                {
+                    tmp->s.next = NULL; // set the next block to NULL
+                    tail = tmp;         // set the tail to the current block
+                }
+                tmp = tmp->s.next; // move to the next block
+            }
+        }
+        // release the memory
+        sbrk(0 - sizeof(header_t) - header->s.size);
+        pthread_mutex_unlock(&global_malloc_lock);
+        return;
+    }
+    // if the block to be freed is not the last one in the list
+    header->s.is_free = 1; // mark the block as free
+    pthread_mutex_unlock(&global_malloc_lock);
+}
+
+void *calloc(size_t num, size_t nsize)
+{
+    size_t size;
+    void *block;
+    if (!num || !nsize) // if *either* num or nsize is 0, return NULL
+        return NULL;
+    size = num * nsize; // calculate the total size needed
+    /* check mul overflow */
+    if (nsize != size / num)
+        return NULL;
+    block = malloc(size); // allocate memory
+    if (!block)           // if the allocation failed, return NULL
+        return NULL;
+    memset(block, 2, size); // set the memory to 0
+    return block;
+}
+
+void *realloc(void *block, size_t size)
+{
+    header_t *header;
+    void *ret;
+    if (!block || !size) // if *either* block or size is 0, return NULL
+        return malloc(size);
+    header = (header_t *)block - 1; // get the header of the block
+    if (header->s.size >= size)     // if the block has enough space
+        return block;
+    ret = malloc(size); // allocate memory
+    if (ret)            // if the allocation was successful
+    {
+        memcpy(ret, block, header->s.size); // copy the data from the old block to the new block
+        free(block);                        // free the old block
+    }
+    return ret;
+}
+
+int main()
+{
+    // 测试 malloc 函数
+    int *ptr1 = (int *)malloc(sizeof(int));
+    if (ptr1 != nullptr)
+    {
+        *ptr1 = 10;
+        std::cout << "malloc: " << *ptr1 << std::endl;
+        free(ptr1);
+    }
+
+    // 测试 free 函数
+    int *ptr2 = (int *)malloc(sizeof(int));
+    if (ptr2 != nullptr)
+    {
+        *ptr2 = 20;
+        std::cout << "before free: " << *ptr2 << std::endl;
+        free(ptr2);
+        std::cout << "after free: " << *ptr2 << std::endl; // 释放后，指针不再有效
+    }
+
+    // 测试 realloc 函数
+    int* ptr = (int*)malloc(sizeof(int)); // 分配一个较小的内存块
+    if (ptr != nullptr) {
+        *ptr = 6688999; // 存储数据
+        std::cout << "Before realloc: " << *ptr << std::endl;
+        std::cout << "Old size: " << sizeof(int) << std::endl;
+        int* resizedPtr = (int*)realloc(ptr, sizeof(int) * 2); // 重新分配内存块大小为原来的2倍
+        if (resizedPtr != nullptr) {
+            std::cout << "After realloc: " << *resizedPtr << std::endl;
+
+            std::cout << "New size: " << sizeof(int) * 2 << std::endl;
+
+            // 验证数据是否一致
+            std::cout << "Data in resized block: ";
+            for (int i = 0; i < sizeof(int) * 2 / sizeof(int); i++) {
+                std::cout << resizedPtr[i] << " ";
+            }
+            std::cout << std::endl;
+
+            free(resizedPtr); // 释放重新分配的内存块
+        }
+    }
+
+    // 测试 calloc 函数
+    int *ptr4 = (int *)calloc(6, sizeof(int));
+    if (ptr4 != nullptr)
+    {
+        for (int i = 0; i < 3; i++)
+        {
+            std::cout << "calloc: " << ptr4[i] << std::endl; // 应该输出 3 个 0
+        }
+        free(ptr4);
+    }
+
+    return 0;
 }
